@@ -1,3 +1,7 @@
+// LƯU Ý: ĐÂY LÀ CODE DÂY ĐEN. 
+
+
+
 #define BLYNK_PRINT Serial
 
 #define BLYNK_TEMPLATE_ID "TMPL6_hHCajkI"
@@ -17,8 +21,12 @@
 #include <BLEEddystoneTLM.h>
 
 String KEY_UUID = "2d7a9f0c-e0e8-4cc9-a71b-a21db2d034a1";
-bool device_In_Family = false;
+bool device_In_Family = false, changeStatusOpen = true, isSpamming = false; 
 
+
+int count =-1,timeStarted, timeAllowedDangerous = 30000, timeAllowedSafe = 6000;
+
+//
 char ssid[] = "Connectify-me"; 
 char pass[] = "qakimyw1"; 
 
@@ -36,15 +44,13 @@ void setup() {
  
 BLYNK_WRITE(V2)
 { 
-    int timeStarted, timeAllowedSafe = 6000, timeAllowedDangerous = 30000; 
     int buttonState = param.asInt(); 
-    if ( buttonState )
+    if ( buttonState && device_In_Family ) // Thay điều kiện ở đây thành nếu như ir sensor không cảm nhận được vật (tức cửa chưa đóng)
     {
+      Serial.println("Time started changed"); 
+      isSpamming = true; 
       timeStarted = millis(); 
-      if (millis() - timeStarted > timeAllowedSafe) // Kiểm tra thời gian để tắt mở. 
-      { 
-
-      }
+      count =0 ; 
     }
 }
 void manufactureDataPrint(BLEAdvertisedDevice device) {
@@ -77,7 +83,7 @@ void manufactureDataPrint(BLEAdvertisedDevice device) {
 }
 
 void loop() {
- 
+  Blynk.run(); 
   BLEScan *scan = BLEDevice::getScan();
   scan->setActiveScan(true);
   scan->setInterval(100);
@@ -132,7 +138,27 @@ void loop() {
  // Serial.println("#################################################################");
   device_In_Family = best > CUTOFF ? true : false; 
   digitalWrite(PIN, best > CUTOFF ? HIGH : LOW);
-  Blynk.run(); 
-  Blynk.virtualWrite(V3, device_In_Family ? "Opening the door" : "Not success" ); 
+  if( count == -1 )   Blynk.virtualWrite(V3, device_In_Family ? "Opening the door" : "Not success" ); 
+  else 
+  {
+    if ( isSpamming && millis() - timeStarted > timeAllowedSafe ) 
+    { 
+      Serial.println("Theft Alert In Home"); 
+      Blynk.logEvent("isdooropen","Theres someone has just opened the door"); 
+      isSpamming = false; 
+      timeStarted = millis(); 
+    }
+    if (!isSpamming && millis() - timeStarted > timeAllowedDangerous)
+    {
+      Serial.println("Is closing the door");
+      changeStatusOpen = false; 
+      Blynk.virtualWrite(V3,"Closing the door"); 
+
+    }
+
+  }
+ 
+
+  
 }
  

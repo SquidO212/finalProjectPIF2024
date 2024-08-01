@@ -17,6 +17,7 @@ const int BTN = 26;
 const int solenoidPin = 27;
 const int TimeWaiting = 5000;
 const int rumblePin = 23;
+const int IR_SENSOR = 5 ;
 unsigned long LooptimeElasped;
 unsigned long LooptimeLast;
 unsigned long LooptimeCurrent;
@@ -104,6 +105,7 @@ uint8_t width = 0;
 void setup() {
   u8g2.begin();
   pinMode(soundPin, INPUT);
+  pinMode(IR_SENSOR,INPUT);
   pinMode(MOTOR_IN1, OUTPUT);
   pinMode(MOTOR_IN2, OUTPUT);
   pinMode(rumblePin, INPUT);
@@ -114,21 +116,6 @@ void setup() {
   Serial.begin(115200);
   attachInterrupt(digitalPinToInterrupt(soundPin), timeInterrupt, FALLING);
 }
-void DoorDetecting() {
-  const int IR_SENSOR = ? ? ? ;
-  bool DoorState = false;
-  unsigned long DoorOpeningTime = millis();
-  unsigned long DoorStateElapsed = 0;
-  if (digitalRead(IR_SENSOR) == true) {
-    Serial.println("Cua mo");
-    DoorState = true;
-    if (DoorState == true) {
-      DoorStateElapsed = millis() - DoorOpeningTime;
-    }
-  }
-}
-
-
 void welcomAnimationPlay() {
   if (DEFAULT_ANI_ALLOW == true) {
 
@@ -611,6 +598,19 @@ void NotWelcomeAnimation() {
     OLED_TIME_B = millis();
   }
 }
+void DoorDetecting() {
+ 
+  bool DoorState = false;
+  unsigned long DoorOpeningTime = millis();
+  unsigned long DoorStateElapsed = 0;
+  if (digitalRead(IR_SENSOR) == false) {
+    Serial.println("Cua mo");
+    DoorState = true;
+    if (DoorState == true) {
+      DoorStateElapsed = millis() - DoorOpeningTime;
+    }
+  }
+}
 
 
 void defaultAnimationPlay() {
@@ -1009,6 +1009,7 @@ void loop() {
     if (passEqually == true) {
       durationCurrent = millis();
       motorRunning();
+      DoorDetecting();
       if (millis() - timer6 > 1000) {
         Serial.println("Door unlocked");
         digitalWrite(solenoidPin, HIGH);

@@ -1,4 +1,21 @@
+#define BLYNK_PRINT Serial
+
+#define BLYNK_TEMPLATE_ID "TMPL6_hHCajkI"
+#define BLYNK_TEMPLATE_NAME "Smart Lock"
+#define BLYNK_TEMPLATE_AUTH "-MGkzlmrHl5d-8hbpisqimzyavI4-myE"
+
+#include<BlynkSimpleEsp32.h> 
+#include<WiFi.h> 
+#include<WiFiClient.h>
+#include <BLEAdvertisedDevice.h>
+#include <BLEDevice.h>
+#include <BLEScan.h>
+#include <BLEBeacon.h>
+#include <BLEUtils.h>
 #include <Arduino.h>
+#include <BLEEddystoneURL.h>
+#include <BLEEddystoneTLM.h>
+
 #include <U8g2lib.h>
 
 #ifdef U8X8_HAVE_HW_SPI
@@ -52,7 +69,9 @@ unsigned long durationCurrent;
 unsigned long durationElapsed = 0;
 int accecptableTime = 2000;
 int averageTestVal = 0;
-bool passEqually = false;
+
+bool passEqually = false; // KIỂM TRA XEM PASSWORD CÓ GIỐNG NHAU KHÔNG  
+
 bool DEFAULT_ANI_ALLOW = true;
 int Number_Of_Claps = 0;
 int TimingArray[6];
@@ -68,6 +87,30 @@ const int MAX_SENS_B = 1100;
 const int KNOCK_MIN = 500;
 const int KNOCK_MAX = 800;
 
+// --------------------------------- KHAI BÁO BIẾN TOÀN CỤC CỦA APP + DETECT ESP32 NEARBY --------------------------------
+
+String KEY_UUID = "2d7a9f0c-e0e8-4cc9-a71b-a21db2d034a1"; // KEY BLUETOOTH ESP32 PHÁT RA TÍN HIỆU.
+bool device_In_Family = false,isSpamming = true; 
+
+
+int count =-1, timeAllowedDangerous = 30000, timeAllowedSafe = 6000;
+
+//
+char ssid[] = "Luan Tran"; 
+char pass[] = "luantran1997"; 
+
+const int PIN = 2;
+const int CUTOFF = -60;
+
+// --------------------------------------------------------------------------------------------------
+
+// --------------------------------- KHAI BÁO BIẾN TOÀN CỤC MỚI + BỊ THAY ĐỔI --------------------------------
+
+bool isMotorClosing = false,isPossibleToCreate = false; 
+
+ unsigned long DoorStateElapsed = 0; // THỜI GIAN IR SENSOR PHÁT HIỆN CỬA CHƯA ĐƯỢC ĐÓNG
+
+// --------------------------------------------------------------------------------------------------
 int accecptableVal = 250;
 int NewArray[0];
 int clapCount = 0;
@@ -103,6 +146,11 @@ const uint8_t OLED_HEIGHT = 64;
 const uint8_t CAL_VAL = 5;
 uint8_t width = 0;
 void setup() {
+  Blynk.begin(BLYNK_TEMPLATE_AUTH,ssid,pass); 
+  pinMode(PIN, OUTPUT);
+  BLEDevice::init("Long name works now");
+  BLEServer *pServer = BLEDevice::createServer();
+  BLEDevice::startAdvertising();
   u8g2.begin();
   pinMode(soundPin, INPUT);
   pinMode(IR_SENSOR,INPUT);
@@ -598,17 +646,15 @@ void NotWelcomeAnimation() {
     OLED_TIME_B = millis();
   }
 }
-void DoorDetecting() {
+void DoorDetecting() { // IR SENSOR DÙNG ĐỂ KIỂM TRA XEM CỬA CÓ ĐANG ĐÓNG HAY CHƯA 
  
-  bool DoorState = false;
   unsigned long DoorOpeningTime = millis();
-  unsigned long DoorStateElapsed = 0;
-  if (digitalRead(IR_SENSOR) == false) {
+ 
+  if (!digitalRead(IR_SENSOR)) { // KHÔNG CÓ VẬT CẢN PHÍA TRƯỚC ( CỬA MỞ )
     Serial.println("Cua mo");
-    DoorState = true;
-    if (DoorState == true) {
-      DoorStateElapsed = millis() - DoorOpeningTime;
-    }
+    DoorStateElapsed = millis() - DoorOpeningTime;  
+  
+  
   }
 }
 
@@ -722,7 +768,7 @@ void defaultAnimationPlay() {
   }
 }
 
-void runmysensor() {
+void runmysensor() { // GỬI VỀ KHOẢNG CÁCH LIÊN TỤC CỦA HC-SR04. 
   if (millis() - timer4 > 250) {
     digitalWrite(trig, LOW);
     delayMicroseconds(5);
@@ -735,39 +781,126 @@ void runmysensor() {
     timer4 = millis();
   }
 }
-void motorRunning() {
-  const OpeningTime = 5000;
-  const ClosingTime = OpeningTime + 5000;
-  if (passEqually == true) {
-    if (millis() - motorTiming <= OpeningTime) {
-      digitalWrite(MOTOR_IN1, HIGH);
-      digitalWrite(MOTOR_IN2, LOW);
-    } else if (millis() - motorTiming <= ClosingTime && millis() - motorTiming > OpeningTime) {
-      digitalWrite(MOTOR_IN1, LOW);
-      digitalWrite(MOTOR_IN2, HIGH);
-    }
-    else if (millis() - motorTiming > ClosingTime) {
-      digitalWrite(MOTOR_IN1, LOW);
-      digitalWrite(MOTOR_IN2, LOW);
-      passEqually = false;
-    }
-  }else if (passEqually == false) {
-    motorTiming = millis();
-    digitalWrite(MOTOR_IN1, LOW);
-    digitalWrite(MOTOR_IN2, LOW);
+
+void motorRunning() { // ĐIỀU KHIỂN MOTOR 
+  if ( passEqually && !isMotorClosing)
+  { 
+    digitalWrite(MOTOR_IN1,HIGH); 
+    digitalWrite(MOTOR_IN2,LOW); 
   }
+  if (motorRunning)
+  { 
+    digitalWrite(MOTOR_IN1,LOW); 
+    digitalWrite(MOTOR_IN2,HIGH); 
+  }
+
 }
 
 void setbackcounter() {
-  if (digitalRead(BTN) == 0) {
+  if (device_In_Family == 0) {
     clapCount = 0;
   }
 }
-void loop() {
 
+BLYNK_WRITE(V2)
+{ 
+  int check = param.asInt(); 
+  if ( check ) isPossibleToCreate = true; 
+  Serial.println("Change value successful"); 
+}
+
+void manufactureDataPrint(BLEAdvertisedDevice device) {
+  if (device.haveManufacturerData() == true) {
+      String strManufacturerData = device.getManufacturerData();
+
+      uint8_t cManufacturerData[100];
+      memcpy(cManufacturerData, strManufacturerData.c_str(), strManufacturerData.length());
+
+      if (strManufacturerData.length() == 25 && cManufacturerData[0] == 0x4C && cManufacturerData[1] == 0x00) {
+        Serial.println("Found an iBeacon!");
+        BLEBeacon oBeacon = BLEBeacon();
+        oBeacon.setData(strManufacturerData);
+        Serial.printf("iBeacon Frame\n");
+        Serial.printf(
+          "ID: %04X Major: %d Minor: %d UUID: %s Power: %d\n", oBeacon.getManufacturerId(), ENDIAN_CHANGE_U16(oBeacon.getMajor()),
+          ENDIAN_CHANGE_U16(oBeacon.getMinor()), oBeacon.getProximityUUID().toString().c_str(), oBeacon.getSignalPower()
+        );
+      } 
+      else 
+      {
+        Serial.println("Found another manufacturers beacon!");
+        Serial.printf("strManufacturerData: %d ", strManufacturerData.length());
+        for (int i = 0; i < strManufacturerData.length(); i++) {
+          Serial.printf("[%x]", cManufacturerData[i]);
+        }
+        Serial.printf("\n");
+      }
+    }
+}
+
+
+void loop() {
+  Blynk.run(); 
+  
+BLEScan *scan = BLEDevice::getScan();
+  scan->setActiveScan(true);
+  scan->setInterval(100);
+  scan->setWindow(50);
+  scan->start(1);
+  BLEScanResults *results = scan->getResults();
+  int best = CUTOFF;
+
+  // Serial.println();
+  // Serial.print("Bluetooth count: ");
+  // Serial.println(results->getCount());
+ // Serial.println("#################################################################");
+  for (int i = 0; i < results->getCount(); i++) {
+    BLEAdvertisedDevice device = results->getDevice(i);
+    int rssi = device.getRSSI();
+
+   // Serial.println("--------------------------------------");
+    String strManufacturerData = device.getManufacturerData();
+
+    uint8_t cManufacturerData[100];
+    BLEBeacon oBeacon = BLEBeacon();
+
+    memcpy(cManufacturerData, strManufacturerData.c_str(), strManufacturerData.length());
+    if (strManufacturerData.length() == 25 && cManufacturerData[0] == 0x4C && cManufacturerData[1] == 0x00) {
+      // Serial.printf("Device's %d rssi: ", i);
+      // Serial.println(rssi);
+      // Serial.println("Found an iBeacon!");
+      // Serial.print("Name: ");
+      // Serial.println(device.getName());  
+      oBeacon.setData(strManufacturerData);
+    //  Serial.printf("iBeacon Frame\n");
+    //   Serial.printf(
+    //     "ID: %04X Major: %d Minor: %d UUID: %s Power: %d\n", oBeacon.getManufacturerId(), ENDIAN_CHANGE_U16(oBeacon.getMajor()),
+    //     ENDIAN_CHANGE_U16(oBeacon.getMinor()), oBeacon.getProximityUUID().toString().c_str(), oBeacon.getSignalPower());
+    // } 
+    // Serial.println("--------------------------------------");
+    }
+
+    String KEY = oBeacon.getProximityUUID().toString();
+    
+    if (rssi > best && rssi > CUTOFF && KEY == KEY_UUID) {
+      best = rssi;
+      // Serial.println("RSSI > CUTOFF");
+      // Serial.print("ADDRESS: ");
+      // Serial.println(device.getAddress().toString());
+      // Serial.print("Name: ");
+      // Serial.println(device.getName());      
+      // Serial.println(device.getServiceData());
+    }
+    
+  }
+ // Serial.println("#################################################################");
+  device_In_Family = best > CUTOFF ? true : false; 
+  
+  digitalWrite(PIN, device_In_Family); 
+  Serial.println("It is running"); 
   runmysensor();
   setbackcounter();
-  while (digitalRead(BTN) == 1) {
+  while (isPossibleToCreate) { // BẮT ĐẦU CÀI MẬT KHẨU GÕ CỬA. 
     LooptimeLast = 0;
     averageTestVal = 0;
     SumUpTestVal = 0;
@@ -872,9 +1005,7 @@ void loop() {
   }
 
 
-
-
-  while (distance <= 25 && digitalRead(BTN) == 0) {
+  while (distance <= 25 && device_In_Family) { // GÕ MẬT KHẨU && DETECT ESP32 NEARBY INCLUDED 
     LooptimeLastPass = 0;
     averageValue = 0;
     allowTrig = false;
@@ -965,7 +1096,7 @@ void loop() {
 
 
 
-  while (distance > 25 && digitalRead(BTN) == 0) {
+  while (distance > 25 && device_In_Family == 1) { // KHOẢNG CÁCH TRÊN 25CM && HÀM SO SÁNH MẬT KHẨU 
     welcomAnimationPlay();
     LooptimeLastPass = 0;
     averageTestVal = 0;
@@ -1032,12 +1163,24 @@ void loop() {
       //code for the buzzer to send the wrong notification
     }
   }
-
+  
+   if ( isSpamming && DoorStateElapsed > timeAllowedSafe ) 
+    { 
+      Serial.println("Theft Alert In Home"); 
+      Blynk.logEvent("isdooropen","Theres someone has just opened the door"); 
+      isSpamming = false; 
+      // timeStarted = millis(); 
+    }
+    if (!isSpamming && DoorStateElapsed > timeAllowedDangerous)
+    {
+      Serial.println("Is closing the door");
+      isMotorClosing = true;
+    }
 
 
   //clapArray[clapCount] = NewArray[0];
 }
-void timeInterrupt() {
+void timeInterrupt() { 
 
   if (ADDRESS == 69) {
     durationElapsed = durationCurrent - durationLast;
@@ -1058,3 +1201,12 @@ void timeInterrupt() {
     ADDRESS = 67;
   }
 }
+
+// LƯU Ý: ĐÂY LÀ CODE DÂY ĐEN. 
+
+
+
+
+
+
+
